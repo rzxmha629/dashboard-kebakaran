@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Rekap Kebakaran</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+body{
+ font-family:Segoe UI,Arial;
+ background:#0f1115;
+ color:#eaeaea;
+ margin:20px;
+}
+h1{color:#ff6b6b;margin-bottom:10px}
+
+/* ===== DASHBOARD ===== */
+.dashboard{
+ display:grid;
+ grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+ gap:14px;
+ margin-bottom:20px;
+}
+.card{
+ background:linear-gradient(145deg,#1b1f2a,#11141b);
+ border-radius:14px;
+ padding:18px;
+ box-shadow:0 10px 25px rgba(0,0,0,.45);
+ transition:.3s;
+}
+.card:hover{transform:translateY(-4px)}
+.card h2{
+ margin:0;
+ font-size:15px;
+ color:#aaa;
+}
+.card .count{
+ font-size:42px;
+ font-weight:800;
+ margin-top:6px;
+}
+
+/* warna tiap kota */
+.jakbar{color:#ff9f43}
+.jakpus{color:#54a0ff}
+.jaksel{color:#1dd1a1}
+.jaktim{color:#f368e0}
+.jakut{color:#48dbfb}
+.seribu{color:#feca57}
+.total{color:#ff6b6b}
+
+input,button{
+ padding:8px 12px;
+ margin:6px 6px 6px 0;
+ border-radius:6px;
+ border:none;
+}
+button{
+ background:#ff6b6b;
+ color:#000;
+ font-weight:bold;
+ cursor:pointer;
+}
+
+/* ===== TABEL ===== */
+table{
+ width:100%;
+ border-collapse:collapse;
+ margin-top:15px;
+ font-size:13px;
+}
+th,td{
+ border:1px solid #2a2e3b;
+ padding:6px;
+}
+th{
+ background:#1c2130;
+ color:#ffb3b3;
+}
+tr:nth-child(even){background:#141824}
+</style>
+</head>
+
+<body>
+
+<h1>🔥 Dashboard Rekap Kebakaran</h1>
+
+<input type="file" id="fileInput" accept=".txt">
+<button onclick="downloadExcel()">⬇ Export Excel</button>
+
+<!-- DASHBOARD -->
+<div class="dashboard">
+ <div class="card"><h2>Jakarta Barat</h2><div class="count jakbar" id="c_jb">0</div></div>
+ <div class="card"><h2>Jakarta Pusat</h2><div class="count jakpus" id="c_jp">0</div></div>
+ <div class="card"><h2>Jakarta Selatan</h2><div class="count jaksel" id="c_js">0</div></div>
+ <div class="card"><h2>Jakarta Timur</h2><div class="count jaktim" id="c_jt">0</div></div>
+ <div class="card"><h2>Jakarta Utara</h2><div class="count jakut" id="c_ju">0</div></div>
+ <div class="card"><h2>Kepulauan Seribu</h2><div class="count seribu" id="c_ks">0</div></div>
+ <div class="card"><h2>Total Kejadian</h2><div class="count total" id="c_total">0</div></div>
+</div>
+
+<table>
+<thead>
+<tr>
+<th>Hari / Tanggal</th>
+<th>Waktu</th>
+<th>Jenis</th>
+<th>Alamat TKP</th>
+<th>Kelurahan</th>
+<th>Kecamatan</th>
+<th>Kota</th>
+<th>Objek</th>
+</tr>
+</thead>
+<tbody id="tbody"></tbody>
+</table>
+
+<script>
+let hasil=[];
+
+/* ==== DATABASE KECAMATAN ==== */
+const db={
+ "Jakarta Barat":["cengkareng","kalideres","kembangan","tambora","grogol petamburan","kebon jeruk","palmerah"],
+ "Jakarta Pusat":["menteng","gambir","tanah abang","senen","sawah besar","johar baru","cempaka putih"],
+ "Jakarta Selatan":["tebet","mampang prapatan","pasar minggu","kebayoran baru","kebayoran lama","setiabudi","pancoran","pesanggrahan"],
+ "Jakarta Timur":["cakung","duren sawit","ciracas","jatinegara","matraman","pulo gadung","kramat jati"],
+ "Jakarta Utara":["tanjung priok","kelapa gading","koja","cilincing","pademangan","penjaringan"],
+ "Kepulauan Seribu":["kepulauan seribu","pulau pramuka","pulau tidung"]
+};
+
+function norm(t){
+ return t.toLowerCase().replace(/[^a-z ]/g," ").replace(/\s+/g," ");
+}
+
+function kotaDariHeader(t){
+ t=norm(t);
+ if(t.includes("jakarta barat")) return "Jakarta Barat";
+ if(t.includes("jakarta pusat")) return "Jakarta Pusat";
+ if(t.includes("jakarta selatan")) return "Jakarta Selatan";
+ if(t.includes("jakarta timur")) return "Jakarta Timur";
+ if(t.includes("jakarta utara")) return "Jakarta Utara";
+ if(t.includes("kepulauan seribu")) return "Kepulauan Seribu";
+ return "";
+}
+
+function ambilKel(t){
+ let m=t.match(/kel(?:urahan)?\.?\s*([A-Za-z ]+)/i);
+ return m?m[1].trim():"";
+}
+
+function deteksiLokasi(teks){
+ let t=norm(teks);
+
+ let m=teks.match(/kec(?:amatan)?\.?\s*([A-Za-z ]+)/i);
+ if(m){
+  let v=norm(m[1]);
+  for(let kota in db){
+   for(let k of db[kota]){
+    if(v.includes(k)) return {kec:k.toUpperCase(),kota};
+   }
+  }
+ }
+
+ for(let kota in db){
+  for(let k of db[kota]){
+   if(t.includes(k)) return {kec:k.toUpperCase(),kota};
+  }
+ }
+
+ let kh=kotaDariHeader(teks);
+ if(kh) return {kec:"",kota:kh};
+
+ return {kec:"",kota:""};
+}
+
+function ambil(label,b){
+ let r=new RegExp(label+"[^\\n]*","i");
+ let m=b.match(r);
+ return m?m[0].split(":").slice(1).join(":").trim():"";
+}
+
+fileInput.addEventListener("change",e=>{
+ let r=new FileReader();
+ r.onload=()=>olah(r.result);
+ r.readAsText(e.target.files[0]);
+});
+
+function olah(teks){
+ hasil=[];
+ tbody.innerHTML="";
+ let unik={};
+
+ let count={
+  "Jakarta Barat":0,"Jakarta Pusat":0,"Jakarta Selatan":0,
+  "Jakarta Timur":0,"Jakarta Utara":0,"Kepulauan Seribu":0
+ };
+
+ teks.split(/\n\n+/).forEach(b=>{
+  if(!/kebakaran/i.test(b)) return;
+
+  let hari=ambil("Hari",b);
+  let waktu=ambil("Waktu Terima",b);
+  let alamat=ambil("Alamat",b);
+  let objek=ambil("Objek",b);
+
+  let kel=ambilKel(alamat);
+  let lok=deteksiLokasi(b+" "+alamat);
+
+  let key=hari+alamat+lok.kota;
+  if(unik[key]) return;
+  unik[key]=1;
+
+  if(lok.kota) count[lok.kota]++;
+
+  hasil.push({
+   Hari:hari,Waktu:waktu,Jenis:"KEBAKARAN",
+   Alamat:alamat,Kelurahan:kel,
+   Kecamatan:lok.kec,Kota:lok.kota,Objek:objek
+  });
+
+  let tr=document.createElement("tr");
+  tr.innerHTML=`
+   <td>${hari}</td><td>${waktu}</td><td>KEBAKARAN</td>
+   <td>${alamat}</td><td>${kel}</td>
+   <td>${lok.kec}</td><td>${lok.kota}</td><td>${objek}</td>`;
+  tbody.appendChild(tr);
+ });
+
+ document.getElementById("c_jb").innerText=count["Jakarta Barat"];
+ document.getElementById("c_jp").innerText=count["Jakarta Pusat"];
+ document.getElementById("c_js").innerText=count["Jakarta Selatan"];
+ document.getElementById("c_jt").innerText=count["Jakarta Timur"];
+ document.getElementById("c_ju").innerText=count["Jakarta Utara"];
+ document.getElementById("c_ks").innerText=count["Kepulauan Seribu"];
+ document.getElementById("c_total").innerText=
+  Object.values(count).reduce((a,b)=>a+b,0);
+}
+
+function downloadExcel(){
+ if(!hasil.length) return alert("Data kosong");
+ let ws=XLSX.utils.json_to_sheet(hasil);
+ let wb=XLSX.utils.book_new();
+ XLSX.utils.book_append_sheet(wb,ws,"Rekap");
+ XLSX.writeFile(wb,"Rekap_Kebakaran.xlsx");
+}
+</script>
+
+</body>
+</html>
